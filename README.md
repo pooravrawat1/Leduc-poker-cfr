@@ -1,11 +1,39 @@
-# Deep CFR for Leduc Poker
-Game-theoretic poker agent using Deep Counterfactual Regret Minimization (Deep CFR) to solve Leduc Poker via self-play.
+# CFR for Leduc Poker
+
+Game-theoretic poker agent using Deep Counterfactual Regret Minimization (CFR) to solve Leduc Poker via self-play.
 
 ## Overview
-This project implements Deep CFR with external sampling and neural regret approximation in PyTorch, evaluating convergence via exploitability against best-response opponents.
 
-## Structure
-- `src/` — core implementation
-- `scripts/` — environment inspection and evaluation
-- `experiments/` — results and plots
+This project implements CFR with external sampling, evaluating convergence via exploitability against best-response opponents.
 
+## Architecture (tentative)
+
+                ┌──────────────────────┐
+                │      User / Tester   │
+                │  CLI or Web Interface│
+                └──────────┬───────────┘
+                           │
+                ┌──────────▼───────────┐
+                │     Agent Interface  │
+                │  (Average Strategy)  │
+                └──────────┬───────────┘
+                           │
+                ┌──────────▼───────────┐
+                │   Strategy Module    │
+                │ extract avg strategy │
+                └──────────┬───────────┘
+                           │
+        ┌──────────────────▼──────────────────┐
+        │            CFR Engine               │
+        │ recursion • regret matching • tree  │
+        └──────────────────┬──────────────────┘
+                           │
+        ┌──────────────────▼──────────────────┐
+        │        Information Set Layer        │
+        │ abstraction + state encoding        │
+        └──────────────────┬──────────────────┘
+                           │
+                ┌──────────▼───────────┐
+                │   RLCard Environment │
+                │   Leduc Poker Engine │
+                └──────────────────────┘
