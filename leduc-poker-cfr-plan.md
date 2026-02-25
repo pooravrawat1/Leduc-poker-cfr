@@ -1,202 +1,422 @@
-## Plan: Leduc Poker CFR Solver — Full Engineering Design
+## Plan: Leduc Poker CFR Solver — Full Engineering Design (C++)
 
-**TL;DR:** Build a research-grade, pure-Python (numpy + matplotlib only) Leduc Poker solver using vanilla CFR, entirely from scratch with zero external game or ML libraries. The existing codebase is a near-empty skeleton — only `extract_state()` exists and will be removed along with RLCard/PyTorch dependencies. The new implementation follows a strict module hierarchy: game engine → CFR tables → CFR recursion → training loop → evaluation → CLI. Every module is tabular; Deep CFR infra (`advantage_net.py`, `replay_buffer.py`) is preserved as a stub for future extension.
+**TL;DR:** Build a research-grade, modern C++17 Leduc Poker solver using vanilla CFR, entirely from scratch with zero external game or ML libraries. Zero dependencies except `nlohmann/json` (header-only) for serialization. The new implementation follows a strict module hierarchy: game engine → CFR tables → CFR recursion → training loop → evaluation → CLI. Every module is tabular; Deep CFR infra is preserved as a stub for future extension. Build with CMake 3.15+; single-threaded first, designed for SIMD/threading extension.
 
 ---
 
-### Phase 0 — Repo Cleanup & Dependency Reset
+### Phase 0 — Repo Cleanup & C++ Setup
 
 **Steps**
 
-1. Rewrite `requirements.txt`: remove `torch`, `rlcard`, keep `numpy`, `matplotlib`, add `dataclasses` (stdlib note only), `argparse` (stdlib).
-2. Rewrite `setup.py` with package name, version, and `find_packages(src)`.
-3. Delete the body of `src/env/leduc_env.py` — the RLCard-dependent `extract_state()` will be replaced by the new game engine. Keep the file as the home for the pure-Python `LeducEnv` wrapper.
-4. Create `tests/` directory (currently absent) with `__init__.py`, `test_game.py`, `test_cfr.py`, `test_evaluation.py`.
-5. Rewrite `notes.md` as a running engineering log.
+1. Delete `requirements.txt` and `setup.py` — no longer needed.
+2. Create `CMakeLists.txt` with:
+   - `cmake_minimum_required(3.15)`
+   - `project(leduc-poker-cfr CXX)`
+   - `set(CMAKE_CXX_STANDARD 17)`
+   - Target for main executable `cfr_train`
+   - Target for test executable `cfr_tests`
+   - Include `nlohmann/json` (single-header, downloaded during CMake build or pre-installed)
+3. Reorganize directory structure:
+   ```
+   leduc-poker-cfr/
+   ├── CMakeLists.txt
+   ├── README.md
+   ├── notes.md
+   ├── include/
+   │   ├── leduc/
+   │   │   ├── game.h          (LeducState, LeducGame)
+   │   │   ├── cfr.h           (InfoSetTable, VanillaCFR)
+   │   │   ├── strategy.h      (regret_match, strategy extraction)
+   │   │   ├── agent.h         (CFRAgent, RandomAgent)
+   │   │   └── evaluation.h    (exploitability, metrics)
+   ├── src/
+   │   ├── game.cpp
+   │   ├── cfr.cpp
+   │   ├── strategy.cpp
+   │   ├── agent.cpp
+   │   ├── evaluation.cpp
+   │   ├── train.cpp           (main entry point for training)
+   │   └── play.cpp            (main entry point for CLI play)
+   ├── tests/
+   │   ├── test_game.cpp
+   │   ├── test_cfr.cpp
+   │   └── test_evaluation.cpp
+   ├── experiments/
+   │   ├── train.sh            (build & train script)
+   │   └── analyze.py          (Python plotting for results)
+   └── data/
+       └── (checkpoint .json files)
+   ```
+4. Create `include/leduc/*.h` with class declarations (no implementations yet).
+5. Create `src/*.cpp` with stub implementations (method bodies return `NotImplementedError` equivalent or `throw std::runtime_error`).
+6. Create `CMakeLists.txt` for GCC/Clang with flags: `-Wall -Wextra -Werror -O2`.
+7. Create minimal `tests/CMakeLists.txt` or embed in root `CMakeLists.txt` with Google Test or custom test runner.
+8. Rewrite `notes.md` as running engineering log.
+9. Delete `src/env/`, `src/cfr/`, `src/train.py`, `tests/` (old Python structure).
 
 ---
 
-### Phase 1 — Game Engine (`src/env/`)
+### Phase 1 — Game Engine (`include/leduc/game.h` + `src/game.cpp`)
 
 This is the foundation. CFR correctness depends entirely on a bug-free game state representation.
 
-**`src/env/leduc_env.py` — `LeducGame` class**
+**`include/leduc/game.h` — `LeducState` and `LeducGame` classes**
 
-6. Define constants: `RANKS = ['J', 'Q', 'K']`, `DECK` (6 cards — two of each rank), `BET_SIZES = {0: 2, 1: 4}` (round 0 / round 1), `MAX_RAISES_PER_ROUND = 1`.
-7. Implement `LeducState` dataclass:
-   - Fields: `private_cards: tuple[str, str]`, `public_card: Optional[str]`, `history: list[str]` (per-round action sequences), `current_round: int`, `current_player: int`, `pot: int`, `chips_to_call: int`, `raises_this_round: int`, `folded: Optional[int]`.
+6. Define constants in header:
+
+   ```cpp
+   constexpr std::array<char, 3> RANKS = {'J', 'Q', 'K'};
+   constexpr std::array<int, 2> BET_SIZES = {2, 4};  // round 0, round 1
+   constexpr int MAX_RAISES_PER_ROUND = 1;
+   constexpr int DECK_SIZE = 6;  // 2 of each rank
+   ```
+
+7. Implement `struct LeducState`:
+   - Fields:
+     ```cpp
+     std::pair<char, char> private_cards;      // (p0 card, p1 card)
+     std::optional<char> public_card;          // null in round 0
+     std::vector<std::vector<std::string>> history;  // per-round actions
+     int current_round;         // 0 or 1
+     int current_player;        // 0 or 1
+     int pot;
+     int chips_to_call;
+     int raises_this_round;
+     std::optional<int> folded; // which player folded, if any
+     ```
    - Methods:
-     - `is_terminal() → bool`
-     - `current_player() → int`
-     - `is_chance_node() → bool` (before cards are dealt or before public card is revealed)
-     - `legal_actions() → list[str]` — returns subset of `['fold', 'call', 'check', 'bet', 'raise']` based on game state
-     - `apply_action(action: str) → LeducState` — returns new state (immutable updates)
-     - `utility(player: int) → float` — only valid on terminal states; implements Leduc showdown rules (pair > high card; J < Q < K)
-     - `info_set_key(player: int) → str` — encodes imperfect information as `"{private_card}|{public_card_or_?}|{round0_history}/{round1_history}"`
+     - `bool is_terminal() const`
+     - `bool is_chance_node() const`
+     - `std::vector<std::string> legal_actions() const`
+     - `LeducState apply_action(const std::string& action) const` (returns new state)
+     - `double utility(int player) const` (only on terminal states)
+     - `std::string info_set_key(int player) const` (encodes imperfect information)
 
-8. Implement showdown logic precisely:
-   - If `folded is not None`: non-folding player wins the pot.
-   - Else: pair (private == public) beats non-pair; among same category, higher rank wins; split pot on tie.
-9. Implement chance sampling: `LeducGame.deal_chance(state) → list[(action, prob)]` — returns all possible private/public card deals with uniform probability.
+8. Implement showdown logic:
+   - If player folded: other player wins pot.
+   - Else: pair beats non-pair; higher rank wins; split on tie.
 
-**`src/env/state_encoder.py` — for future Deep CFR extension**
+9. Implement `class LeducGame`:
+   - `LeducState initial_state() const` — returns root state (pre-deal)
+   - `std::vector<std::pair<std::string, double>> sample_chance(const LeducState&) const` — returns all card deals with probabilities
+   - `std::vector<LeducState> get_all_hands() const` — enumerates all initial hands (for testing/exploitability)
 
-10. Stub `encode_state(state: LeducState, player: int) → np.ndarray` — 20-dim float32 vector matching the existing spec, but corrected: fix the sparse one-hot bug (use indices 0–5 directly, not `*2`), fix the player indicator feature.
+**`src/game.cpp` — Implementations**
 
-**Tests** (in `tests/test_game.py`):
+All method implementations (no stubs—implement fully in Phase 1).
 
-11. Test `legal_actions()` at root, after bet, after raise, after max raises.
-12. Test `apply_action()` transitions: fold → terminal, call → next player or round advance.
-13. Test `utility()` on a) fold scenario, b) pair win, c) high-card win, d) split pot.
-14. Test `info_set_key()` returns identical keys for two histories that produce the same information set.
+**Tests** (`tests/test_game.cpp`):
 
----
-
-### Phase 2 — CFR Tables (`src/cfr/tables.py`)
-
-15. Implement `InfoSetTable`:
-
-- Backed by `collections.defaultdict(lambda: defaultdict(float))`.
-- Methods: `get(info_set, action) → float`, `update(info_set, action, delta)`, `get_all(info_set) → dict[str, float]`, `save(path)` / `load(path)` using `json`.
-
-16. Implement two instances managed by the solver: `regret_table: InfoSetTable` (cumulative counterfactual regrets) and `strategy_sum_table: InfoSetTable` (cumulative weighted strategies).
+10. Test `legal_actions()` at root, after bet, after raise, after max raises.
+11. Test `apply_action()` transitions: fold → terminal, call → next player/round.
+12. Test `utility()` on a) fold, b) pair win, c) high-card win, d) split pot.
+13. Test `info_set_key()` produces identical keys for equivalent situations.
 
 ---
 
-### Phase 3 — Strategy Extraction (`src/cfr/strategy.py`)
+### Phase 2 — CFR Tables (`include/leduc/cfr.h` + `src/cfr.cpp`)
 
-17. Implement `regret_match(regrets: dict[str, float]) → dict[str, float]`:
+14. Implement `class InfoSetTable`:
 
-- Clip negatives to 0.
-- If all ≤ 0, return uniform over actions.
-- Else normalize positive regrets.
+- Backed by `std::unordered_map<std::string, std::unordered_map<std::string, double>>`.
+- Methods:
+  ```cpp
+  double get(const std::string& info_set, const std::string& action) const;
+  void update(const std::string& info_set, const std::string& action, double delta);
+  std::unordered_map<std::string, double> get_all(const std::string& info_set) const;
+  void save(const std::string& path) const;  // JSON serialization
+  static InfoSetTable load(const std::string& path);
+  ```
 
-18. Implement `get_current_strategy(info_set, legal_actions, regret_table) → dict[str, float]` — calls `regret_match`.
-19. Implement `get_average_strategy(info_set, legal_actions, strategy_sum_table) → dict[str, float]` — normalizes strategy sums; fallback to uniform if zero.
-20. Implement `save_strategy(strategy_sum_table, path: str)` / `load_strategy(path: str) → InfoSetTable`.
+15. Implement two instances in CFR solver:
+
+- `regret_table: InfoSetTable` (cumulative counterfactual regrets)
+- `strategy_sum_table: InfoSetTable` (cumulative weighted strategies)
 
 ---
 
-### Phase 4 — Vanilla CFR Solver (`src/cfr/cfr.py`)
+### Phase 3 — Strategy Extraction (`include/leduc/strategy.h` + `src/strategy.cpp`)
+
+16. Implement utility functions:
+
+```cpp
+std::unordered_map<std::string, double> regret_match(
+    const std::unordered_map<std::string, double>& regrets
+);
+// Clamps negative regrets to 0; returns uniform if all ≤ 0; normalizes positive.
+
+std::unordered_map<std::string, double> get_current_strategy(
+    const std::string& info_set,
+    const std::vector<std::string>& legal_actions,
+    const InfoSetTable& regret_table
+);
+
+std::unordered_map<std::string, double> get_average_strategy(
+    const std::string& info_set,
+    const std::vector<std::string>& legal_actions,
+    const InfoSetTable& strategy_sum_table
+);
+
+void save_strategy(const InfoSetTable& strategy_sum_table, const std::string& path);
+InfoSetTable load_strategy(const std::string& path);
+```
+
+---
+
+### Phase 4 — Vanilla CFR Solver (`include/leduc/cfr.h` + `src/cfr.cpp`)
 
 This is the core research component.
 
-21. Implement `VanillaCFR` class with:
+17. Implement `class VanillaCFR`:
 
-- Constructor: takes `game: LeducGame`, `regret_table`, `strategy_sum_table`.
-- `cfr(state: LeducState, player: int, reach_p0: float, reach_p1: float) → float`:
-  - **Terminal**: return `state.utility(player)`.
-  - **Chance node**: enumerate all card deals w/ their probabilities; recurse with scaled reach; return probability-weighted average.
-  - **Decision node** (for `current_player`):
-    - Retrieve `strategy = get_current_strategy(info_set, legal_actions, regret_table)`.
-    - For each action: recurse to get `action_value`.
-    - Compute `node_value = sum(strategy[a] * action_value[a])`.
-    - **Regret update** (only for `current_player == player`): `regret_table.update(info_set, a, opponent_reach * (action_value[a] - node_value))`.
-    - **Strategy sum update**: `strategy_sum_table.update(info_set, a, player_reach * strategy[a])`.
-    - Return `node_value`.
-- `train_iteration()`: calls `cfr(root_state, player=0, 1.0, 1.0)` then `cfr(root_state, player=1, 1.0, 1.0)` — **alternating updates** (standard vanilla CFR).
+```cpp
+class VanillaCFR {
+public:
+    VanillaCFR(const LeducGame& game);
 
-**Important invariant to document:** reach probability of the traversing player propagates through their own nodes; opponent's reach propagates through opponent nodes and chance nodes.
+    double cfr(const LeducState& state, int player, double reach_p0, double reach_p1);
+    void train_iteration();
+
+    const InfoSetTable& get_regret_table() const { return regret_table_; }
+    const InfoSetTable& get_strategy_sum_table() const { return strategy_sum_table_; }
+
+private:
+    const LeducGame& game_;
+    InfoSetTable regret_table_;
+    InfoSetTable strategy_sum_table_;
+};
+```
+
+18. Implement `VanillaCFR::cfr()`:
+
+- **Terminal node**: return `state.utility(player)`
+- **Chance node**: enumerate card deals; recurse with scaled reach; return probability-weighted utility
+- **Decision node** (for `state.current_player()`):
+  - Get `strategy = get_current_strategy(info_set, legal_actions, regret_table_)`
+  - For each action: compute `action_value = cfr(next_state, player, ...)`
+  - Compute `node_value = sum(strategy[a] * action_value[a])`
+  - **Regret update** (only if `state.current_player() == player`):
+    `regret_table_.update(info_set, a, opponent_reach * (action_value[a] - node_value))`
+  - **Strategy sum update**:
+    `strategy_sum_table_.update(info_set, a, player_reach * strategy[a])`
+  - Return `node_value`
+
+19. Implement `VanillaCFR::train_iteration()`:
+
+- Call `cfr(game_.initial_state(), 0, 1.0, 1.0)` then `cfr(..., 1, 1.0, 1.0)`
+- Standard vanilla CFR with alternating player updates per iteration
+
+**Important invariant:** Own player's reach probability flow through their own decision nodes; opponent's reach through opponent's nodes and chance nodes.
+
+### Phase 5 — Training Pipeline (`src/train.cpp` + supporting helpers)
+
+20. Implement `class CFRTrainer`:
+
+```cpp
+struct CFRConfig {
+    int num_iterations = 100000;
+    int checkpoint_interval = 10000;
+    std::string output_dir = "checkpoints";
+    int seed = 42;
+};
+
+class CFRTrainer {
+public:
+    CFRTrainer(const LeducGame& game, const CFRConfig& config);
+    void train();
+    void save_checkpoint(int iteration) const;
+
+private:
+    const LeducGame& game_;
+    CFRConfig config_;
+    VanillaCFR solver_;
+    std::ofstream csv_log_;
+};
+```
+
+21. Implement training loop:
+
+- For each iteration: `solver_.train_iteration()`
+- Log average game value every 1000 iterations
+- Save checkpoint every `checkpoint_interval` iterations
+- Use `std::chrono` for timing
+
+22. Implement `src/train.cpp` entry point:
+
+```cpp
+int main(int argc, char* argv[]) {
+    // Parse command-line: --iterations, --output, --seed (using simple arg parsing or getopt)
+    CFRConfig config = parse_args(argc, argv);
+    LeducGame game;
+    CFRTrainer trainer(game, config);
+    trainer.train();
+    return 0;
+}
+```
+
+- Usage: `./cfr_train --iterations 100000 --output checkpoints/`
 
 ---
 
-### Phase 5 — Training Pipeline (`src/cfr/train.py` + `src/train.py`)
-
-22. Implement `CFRTrainer` in `src/cfr/train.py`:
-
-- Constructor: `num_iterations`, `checkpoint_interval`, `output_dir`, `seed`.
-- `train() → TrainingResult` — runs `num_iterations` of `train_iteration()`; logs average game value per 1000 iterations; saves checkpoint every `checkpoint_interval` iterations.
-- `TrainingResult`: dataclass with `regret_history`, `game_value_history`, `final_exploitability`.
-
-23. Implement `src/utils/config.py`: `CFRConfig` dataclass — all hyperparameters with defaults (`num_iterations=100_000`, `checkpoint_interval=10_000`, `seed=42`, `output_dir='checkpoints/'`), plus `from_args(args) → CFRConfig` using `argparse`.
-24. Implement `src/utils/logging.py`: `TrainingLogger` — writes CSV (`iteration, game_value, exploitability`) and prints tqdm-style progress since `tqdm` is available.
-25. Implement `src/train.py`: entry-point CLI — `python src/train.py --iterations 100000 --output checkpoints/` — invokes `CFRConfig.from_args()` → `CFRTrainer(config).train()`.
-
----
-
-### Phase 6 — Exploitability & Evaluation (`src/evaluation/`)
+### Phase 6 — Exploitability & Evaluation (`include/leduc/evaluation.h` + `src/evaluation.cpp`)
 
 Exploitability quantifies how close to Nash equilibrium the learned strategy is — the primary research metric.
 
-26. Implement `src/evaluation/exploitability.py` — `compute_exploitability(strategy_sum_table, game) → float`:
+23. Implement `class Evaluator`:
 
-- For each player `p`, compute the **best response value** `br_value(p)` by walking the full game tree:
-  - At opponent's nodes: follow opponent's average strategy (weighted average over actions).
-  - At `p`'s nodes: take the `max` over all actions (best response).
-  - At chance nodes: probability-weighted average.
-- `exploitability = br_value(0) + br_value(1)` (in a zero-sum game this equals the sum of exploitabilities).
+```cpp
+class Evaluator {
+public:
+    Evaluator(const LeducGame& game, const InfoSetTable& strategy_sum_table);
+    double compute_exploitability();
+    double compute_best_response_value(int player_to_defend_against);
 
-27. Implement `src/evaluation/play_match.py` — `run_match(agent_a, agent_b, num_games, seed) → MatchResult` using `LeducGame` without RLCard.
-28. Implement `src/agent/cfr_agent.py` — `CFRAgent.act(state) → str`: looks up `get_average_strategy(state.info_set_key(player), ...)` and samples from the distribution.
-29. Implement `src/agent/random_agent.py` — `RandomAgent.act(state) → str`: uniform sample from `state.legal_actions()`.
-30. Implement `src/evaluation/metrics.py` and `src/utils/metrics.py`: win rate, average pot, fold frequency, bluff frequency by info-set.
-31. Implement `scripts/evaluate.py`: loads checkpoint, runs `CFRAgent` vs `RandomAgent` for 10,000 games, prints win rate + exploitability.
+private:
+    const LeducGame& game_;
+    const InfoSetTable& strategy_sum_table_;
+    double br_value_recursive(const LeducState& state, int defending_player);
+};
+```
 
-**Tests** (`tests/test_evaluation.py`):
+24. Implement best-response (BR) value computation:
 
-32. Test that `compute_exploitability` of a **uniform random** strategy is > 0.
-33. Test that exploitability decreases monotonically (or near-monotonically) after N iterations.
-34. Test `CFRAgent.act()` always returns a legal action.
+- At opponent's nodes: follow opponent's average strategy (sum over actions)
+- At defending player's nodes: take `max` over all actions
+- At chance nodes: probability-weighted average
+- Exploitability = BR_value(p0) + BR_value(p1)
+
+25. Implement agents:
+
+```cpp
+class CFRAgent {
+public:
+    CFRAgent(const InfoSetTable& strategy_sum_table);
+    std::string act(const LeducState& state) const;  // Sample from strategy
+};
+
+class RandomAgent {
+    std::string act(const LeducState& state) const;  // Uniform over legal actions
+};
+```
+
+26. Implement `struct MatchResult` and match player:
+
+```cpp
+struct MatchResult {
+    double player0_winrate;
+    int player0_wins, player1_wins;
+    std::vector<double> payoffs;
+};
+
+MatchResult play_match(Agent& agent_a, Agent& agent_b, int num_games, int seed);
+```
 
 ---
 
-### Phase 7 — Utils: Metrics & Checkpointing (`src/utils/`)
+### Phase 7 — Checkpointing & Serialization (already in Phase 2–6)
 
-35. Implement `src/utils/metrics.py`: `RunningMean` tracker; `MetricsStore` dict accumulating per-iteration scalars.
-36. Implement checkpointing in `TrainingLogger`: `save_checkpoint(iteration, regret_table, strategy_sum_table, path)` / `load_checkpoint(path) → (regret_table, strategy_sum_table, iteration)` using `json.dump/load`.
-
----
-
-### Phase 8 — CLI Human Play Interface (`src/interface/cli_play.py`)
-
-37. Implement `CLIGame` class:
-
-- `play_game(agent: CFRAgent, human_player: int)` — drives a full interactive game loop.
-- Displays: private card, public card when revealed, pot size, legal actions.
-- Human inputs action via stdin; validates against `legal_actions()`.
-- After terminal: shows result, cards, payoff.
-- `play_session(agent, num_games)` — loops `play_game`, tracks session stats.
-
-38. Implement entry point: `python src/interface/cli_play.py --checkpoint checkpoints/final.json --games 10`.
+27. Checkpointing is integrated into `InfoSetTable::save()` / `load()` and `CFRTrainer::save_checkpoint()`.
+28. Use `nlohmann/json` for JSON serialization of `regret_table` and `strategy_sum_table`.
+29. Structure: `{"regret_table": {"info_set": {"action": value, ...}, ...}, "strategy_sum_table": {...}}`
 
 ---
 
-### Phase 9 — Visualization & Analytics (`experiments/plots.ipynb`)
+### Phase 8 — CLI Human Play Interface (`src/play.cpp`)
 
-39. Populate `experiments/plots.ipynb` with cells for:
+28. Implement interactive CLI game loop:
 
-- **Regret convergence**: plot `sum |regret_t|` vs iteration.
-- **Exploitability curve**: plot exploitability (mBB/hand) vs iteration.
-- **Strategy frequency heatmap**: for key info-sets (e.g., holding Q pre-flop), show action distribution evolution.
-- **Win-rate vs random**: bar chart of CFR agent win rate at checkpoint intervals.
+```cpp
+class CLIGame {
+public:
+    CLIGame(const LeducGame& game, const CFRAgent& agent);
+    void play_game(int human_player);  // 0 or 1
+    void play_session(int num_games);
 
-40. Implement `experiments/train_leduc.sh`: full training + evaluation shell script.
+private:
+    void display_state(const LeducState& state, int human_player);
+    std::string get_human_action();
+};
+```
+
+29. Implement `src/play.cpp` entry point:
+
+```cpp
+int main(int argc, char* argv[]) {
+    // Parse: --checkpoint <path> --games <num> --human-player <0|1>
+    auto [strategy, config] = load_checkpoint(checkpoint_path);
+    LeducGame game;
+    CFRAgent agent(strategy);
+    CLIGame cli_game(game, agent);
+    cli_game.play_session(num_games);
+    return 0;
+}
+```
+
+- Usage: `./cfr_play --checkpoint checkpoints/final.json --games 10 --human-player 0`
+
+---
+
+### Phase 9 — Visualization & Analytics (`experiments/analyze.py`)
+
+30. Keep analysis in Python for simplicity (matplotlib, numpy for plotting):
+
+- Implement `experiments/analyze.py` to:
+  - Read training CSV logs from `data/training_log.csv` (written by C++ trainer)
+  - Plot **exploitability vs. iteration**
+  - Plot **cumulative regret norm**
+  - Plot **win-rate vs. random agent** over checkpoint intervals
+  - (Optional) strategy frequency heatmap for key info-sets
+- Run: `python experiments/analyze.py --log-file data/training_log.csv`
+
+31. Implement `experiments/train.sh`:
+
+```bash
+#!/bin/bash
+cd "$(dirname "$0")/.."
+mkdir -p checkpoints data
+./build/cfr_train --iterations 100000 --output checkpoints/
+python experiments/analyze.py --log-file data/training_log.csv
+```
 
 ---
 
 ### Phase 10 — Documentation & README
 
-41. Rewrite `README.md`: project overview, setup instructions, `python src/train.py` quickstart, `python src/interface/cli_play.py` usage, architecture diagram in ASCII.
-42. Add docstrings to every public class and function.
-43. Update `notes.md` as an engineering decision log.
+32. Rewrite `README.md`:
+
+- Project overview: C++17 Leduc CFR solver, no external dependencies
+- Build instructions: `cmake --build build`, requires CMake 3.15+, C++17 compiler
+- Quick start:
+  ```bash
+  mkdir build && cd build
+  cmake .. && make
+  ./cfr_train --iterations 100000 --output ../checkpoints/
+  ./cfr_play --checkpoint ../checkpoints/final.json --games 5
+  ```
+- Architecture overview (ASCII diagram showing Phases 1–8)
+- Experimental results placeholder
+
+33. Add doxygen-style docstrings to all public classes and functions in headers.
+
+34. Update `notes.md` as engineering decision log with session timestamps.
 
 ---
 
 ### Stubs Preserved for Future Extension
 
-- `src/models/advantage_net.py`: leave stubbed with a class docstring explaining its role in Deep CFR.
-- `src/utils/replay_buffer.py`: leave stubbed for MCCFR / Deep CFR.
-- `src/interface/web_app.py`: leave stubbed with a Flask route skeleton.
+- `include/leduc/deep_cfr.h`: stub with class docstring explaining role in Deep CFR (neural network approximation of value function).
+- `include/leduc/replay_buffer.h`: stub for MCCFR / Deep CFR experience replay.
+- `include/leduc/web_interface.h`: stub for future web-based UI (REST API or WebSocket).
 
 ---
 
 ### Verification
 
-- **Unit tests**: `python -m pytest tests/` — covers game engine, CFR updates, strategy normalization, exploitability, agent legality.
-- **Convergence check**: run 100,000 iterations; expected exploitability < 0.05 (Leduc converges fast due to small game tree).
-- **Smoke test**: `python scripts/evaluate.py --checkpoint checkpoints/100k.json` — should report CFR agent win rate > 55% vs random.
-- **CLI test**: `python src/interface/cli_play.py --checkpoint checkpoints/100k.json --games 1` — play one hand manually.
-- **Plot notebook**: execute all cells; confirm all four charts render without error.
+- **Unit tests**: `./build/cfr_tests` — covers game engine, CFR updates, strategy normalization, exploitability, agent legality.
+- **Convergence check**: run 100,000 iterations; expected exploitability < 0.05 mBB/hand (Leduc converges fast).
+- **Smoke test**: `./cfr_play --checkpoint checkpoints/100k.json --games 1` — play one hand manually.
+- **Match test**: `./cfr_train --iterations 10000 && python experiments/analyze.py` — write logs, analyze convergence.
+- **Build test**: `cmake --build build` with `-Wall -Wextra -Werror` (no warnings).
 
 ---
 
@@ -216,10 +436,12 @@ Exploitability quantifies how close to Nash equilibrium the learned strategy is 
 
 ### Decisions
 
-- **Pure from-scratch**: Remove `rlcard` and `torch`; `requirements.txt` will only contain `numpy` and `matplotlib`.
-- **String keys for info-sets**: Tabular CFR uses `"{private}|{public_or_?}|{round0_hist}/{round1_hist}"` — human-readable, debuggable, no encoding bugs.
-- **Alternating player updates**: Both players updated per iteration (standard vanilla CFR); faster convergence than simultaneous.
-- **Immutable `LeducState`**: `apply_action()` returns a new state object — correct for recursive CFR; no undo stack needed.
-- **`LeducGame` as `src/env/` not `src/game/`**: The existing directory structure is kept; adding a `src/game/` directory is not necessary and would require refactoring all existing imports.
-- **Exploitability via full tree traversal**: Feasible for Leduc (small game tree ~3 million nodes at most); no approximation needed.
-- **Deep CFR stubs retained**: `advantage_net.py` and `replay_buffer.py` remain as documented stubs — architecture explicitly supports future extension.
+- **Language**: C++17 for performance and modern features (structured bindings, `std::optional`, `std::unordered_map`).
+- **Build system**: CMake 3.15+ for cross-platform builds.
+- **Minimal dependencies**: Only `nlohmann/json` (header-only) for serialization; no external game libraries or ML frameworks.
+- **String keys for info-sets**: Tabular CFR uses `"{private}|{public_or_?}|{round0_hist}/{round1_hist}"` — human-readable, debuggable.
+- **Immutable `LeducState`**: `apply_action()` returns a new state — correct for recursive CFR.
+- **Header-only utilities**: Small helper functions in headers (parsing, constants) to avoid link complexity.
+- **Single-threaded first**: Core CFR loops are single-threaded; OpenMP pragmas can be added later without changing interface.
+- **Deep CFR stubs**: `deep_cfr.h` and `replay_buffer.h` retained as documented stubs — extensible design.
+- **Python for post-analysis**: Training is C++ (performance); analysis (`experiments/analyze.py`) stays Python (quick iteration, plotting).

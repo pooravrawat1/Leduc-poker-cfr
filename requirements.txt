@@ -1,5 +1,5 @@
-torch
-numpy
-rlcard
-matplotlib
-tqdm
+# C++ project - no Python dependencies
+# For post-training analysis (optional):
+# numpy
+# matplotlib
+
