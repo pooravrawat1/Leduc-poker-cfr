@@ -1,8 +1,9 @@
-#include <iostream>
+#include <bits/stdc++.h>
+using namespace std;
 
 int main()
 {
-    std::cout << "CFR solver tests\n";
-    std::cout << "Phase 2-4 tests: not yet implemented\n";
+    cout << "CFR solver tests\n";
+    cout << "Phase 2-4 tests: not yet implemented\n";
     return 0;
 }

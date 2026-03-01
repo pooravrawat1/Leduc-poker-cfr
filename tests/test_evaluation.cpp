@@ -1,8 +1,8 @@
-#include <iostream>
-
+#include <bits/stdc++.h>
+using namespace std;
 int main()
 {
-    std::cout << "Evaluation tests\n";
-    std::cout << "Phase 6 tests: not yet implemented\n";
+    cout << "Evaluation tests\n";
+    cout << "Phase 6 tests: not yet implemented\n";
     return 0;
 }
