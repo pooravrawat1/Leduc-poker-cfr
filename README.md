@@ -275,15 +275,6 @@ xcode-select --install
 - Check available RAM: `free -h` (Linux) or `wmic OS get TotalVisibleMemorySize` (Windows)
 - Profile with Valgrind: `valgrind --leak-check=full ./leduc-cfr`
 
-## Documentation
-
-- **[Design Document](./.kiro/specs/optimized-leduc-cfr/design.md)** — Detailed architecture and algorithm design
-- **[Requirements Document](./.kiro/specs/optimized-leduc-cfr/requirements.md)** — Functional and non-functional requirements
-- **[Task List](./.kiro/specs/optimized-leduc-cfr/tasks.md)** — Implementation roadmap and progress tracking
-- **[Project Plan](./leduc-poker-cfr-plan.md)** — High-level engineering roadmap
-
-> **Note:** The `.kiro/` directory contains internal project specifications and is ignored by version control.
-
 ## References
 - [Analysis of Bluffing by DQN and CFR in Leduc Hold'em Poker](https://arxiv.org/html/2509.04125v1)
 - [Leduc Poker](https://en.wikipedia.org/wiki/Leduc_poker) — Wikipedia
