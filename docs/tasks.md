@@ -26,12 +26,12 @@
 
 ### 1.3 Information Set Encoding
 
-- [ ] 1.3.1 Design 16-bit information set encoding scheme
+- [x] 1.3.1 Design 16-bit information set encoding scheme
   - Document bit layout in include/leduc/infoset.h
   - Player card (2 bits), public card (2 bits), betting history (6 bits)
-- [ ] 1.3.2 Implement compute_infoset_key() function
+- [x] 1.3.2 Implement compute_infoset_key() function
   - Takes GameState and player, returns uint16_t
-- [ ] 1.3.3 Implement decode_infoset_key() function (for debugging)
+- [x] 1.3.3 Implement decode_infoset_key() function (for debugging)
 - [ ] 1.3.4 Write unit tests for information set encoding
   - Test uniqueness for different game states
   - Test that equivalent states produce same key

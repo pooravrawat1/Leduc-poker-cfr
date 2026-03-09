@@ -37,7 +37,8 @@ namespace leduc
         uint8_t raises_this_round; // Raises issued in the current round (0–2)
         uint8_t action_history;    // Bit-packed action sequence (2 bits per action)
         uint8_t folded;            // NO_FOLD (0xFF) or folding player index
-        uint8_t padding[6];        // Pad to 16 bytes total
+        uint8_t history_r0;        // Terminal sequence of round 0 (for info-sets)
+        uint8_t padding[5];        // Pad to 16 bytes total
 
         // -----------------------------------------------------------------------
         // Factory: build the initial state for a new hand.
