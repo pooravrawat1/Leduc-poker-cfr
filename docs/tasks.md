@@ -41,13 +41,13 @@
 
 ### 2.1 Game State Operations
 
-- [ ] 2.1.1 Implement is_terminal() function
+- [x] 2.1.1 Implement is_terminal() function
   - Check for fold or showdown conditions
-- [ ] 2.1.2 Implement is_chance_node() function
+- [x] 2.1.2 Implement is_chance_node() function
   - Check if public card needs to be dealt
-- [ ] 2.1.3 Implement legal_actions_mask() function
+- [x] 2.1.3 Implement legal_actions_mask() function
   - Branchless computation of legal action bitmask
-- [ ] 2.1.4 Implement count_legal_actions() function
+- [x] 2.1.4 Implement count_legal_actions() function
   - Count bits in action mask
 
 ### 2.2 State Transitions

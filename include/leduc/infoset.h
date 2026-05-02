@@ -1,6 +1,7 @@
 #pragma once
 
-#include <bits/stdc++.h>
+#include <cstdint>
+#include <string>
 #include "types.h"
 #include "game_state.h"
 

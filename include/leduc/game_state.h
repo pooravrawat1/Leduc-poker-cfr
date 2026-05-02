@@ -1,6 +1,5 @@
 #pragma once
 
-#include <bits/stdc++.h>
 #include "types.h"
 
 namespace leduc
@@ -81,6 +80,37 @@ namespace leduc
         bool is_chance_node() const noexcept
         {
             return (round == 1) && (cards[2] == CARD_NONE);
+        }
+
+        /// Bitmask of legal player actions in this state.
+        /// bit 0 = FOLD, bit 1 = CALL/CHECK, bit 2 = RAISE/BET.
+        uint8_t legal_actions_mask() const noexcept
+        {
+            const uint8_t active = static_cast<uint8_t>(!is_terminal() && !is_chance_node());
+            const uint8_t active_mask = static_cast<uint8_t>(0u - active);
+
+            uint8_t mask = 0;
+            mask |= static_cast<uint8_t>(to_call > 0) << static_cast<uint8_t>(Action::FOLD);
+            mask |= static_cast<uint8_t>(1u << static_cast<uint8_t>(Action::CALL));
+            mask |= static_cast<uint8_t>(raises_this_round < MAX_RAISES_PER_ROUND)
+                    << static_cast<uint8_t>(Action::RAISE);
+
+            return static_cast<uint8_t>(mask & active_mask);
+        }
+
+        /// Count legal actions in the low three bits of an action mask.
+        static uint8_t count_legal_actions(uint8_t action_mask) noexcept
+        {
+            action_mask &= 0x07u;
+            return static_cast<uint8_t>((action_mask & 0x01u) +
+                                        ((action_mask >> 1) & 0x01u) +
+                                        ((action_mask >> 2) & 0x01u));
+        }
+
+        /// Count legal player actions in this state.
+        uint8_t count_legal_actions() const noexcept
+        {
+            return count_legal_actions(legal_actions_mask());
         }
     };
 
