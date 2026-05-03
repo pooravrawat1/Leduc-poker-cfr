@@ -52,14 +52,14 @@
 
 ### 2.2 State Transitions
 
-- [ ] 2.2.1 Implement apply_action() function
+- [x] 2.2.1 Implement apply_action() function
   - Handle FOLD: set folded player
   - Handle CALL: update pot, advance round/player
   - Handle RAISE: update pot, to_call, raises_this_round
   - Update action_history bitfield
-- [ ] 2.2.2 Implement apply_chance() function
+- [x] 2.2.2 Implement apply_chance() function
   - Deal public card at start of round 1
-- [ ] 2.2.3 Write unit tests for state transitions
+- [x] 2.2.3 Write unit tests for state transitions
   - Test all action types
   - Test round advancement
   - Test terminal state detection

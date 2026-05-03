@@ -112,6 +112,92 @@ namespace leduc
         {
             return count_legal_actions(legal_actions_mask());
         }
+
+        uint8_t bet_size() const noexcept
+        {
+            return (round == 0) ? BET_SIZE_ROUND0 : BET_SIZE_ROUND1;
+        }
+
+        uint8_t next_action_history(Action action) const noexcept
+        {
+            return static_cast<uint8_t>(
+                (action_history << 2) | static_cast<uint8_t>(action));
+        }
+
+        GameState apply_chance(uint8_t public_card) const noexcept
+        {
+            GameState next = *this;
+
+            next.cards[2] = public_card;
+            next.player = 0;
+            next.to_call = 0;
+            next.raises_this_round = 0;
+            next.action_history = 0;
+
+            return next;
+        }
+
+        GameState apply_action(Action action) const noexcept
+        {
+            GameState next = *this;
+            const uint8_t new_history = next_action_history(action);
+
+            next.action_history = new_history;
+
+            if (action == Action::FOLD)
+            {
+                next.folded = player;
+                return next;
+            }
+
+            if (action == Action::RAISE)
+            {
+                const uint8_t amount = bet_size();
+
+                next.pot = static_cast<uint8_t>(next.pot + to_call + amount);
+                next.to_call = amount;
+                next.raises_this_round = static_cast<uint8_t>(raises_this_round + 1);
+                next.player = static_cast<uint8_t>(1 - player);
+
+                return next;
+            }
+
+            if (action == Action::CALL)
+            {
+                next.pot = static_cast<uint8_t>(next.pot + to_call);
+                next.to_call = 0;
+
+                const bool was_calling_bet = (to_call > 0);
+                const bool was_second_check = (to_call == 0 && action_history != 0);
+                const bool closes_round = was_calling_bet || was_second_check;
+
+                if (!closes_round)
+                {
+                    next.player = static_cast<uint8_t>(1 - player);
+                    return next;
+                }
+
+                if (round == 0)
+                {
+                    next.history_r0 = new_history;
+                    next.round = 1;
+                    next.cards[2] = CARD_NONE;
+                    next.player = 0;
+                    next.raises_this_round = 0;
+                    next.action_history = 0;
+                    return next;
+                }
+
+                next.round = NUM_ROUNDS;
+                next.player = 0;
+                next.raises_this_round = 0;
+                next.action_history = new_history;
+                return next;
+            }
+
+            return next;
+        }
+
     };
 
     // Verify the struct is exactly 16 bytes at compile time.

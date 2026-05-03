@@ -61,6 +61,96 @@ void test_non_decision_nodes_have_no_actions()
     assert(showdown.count_legal_actions() == 0u);
 }
 
+void test_first_check_switches_player()
+{
+    const GameState state = GameState::make_initial(CARD_J, CARD_Q);
+    const GameState next = state.apply_action(Action::CALL);
+
+    assert(next.round == 0);
+    assert(next.player == 1u);
+    assert(next.pot == INITIAL_POT);
+    assert(next.to_call == 0u);
+    assert(next.action_history == 0x01u);
+    assert(!next.is_terminal());
+}
+
+void test_check_check_reaches_chance_node()
+{
+    const GameState p1_to_act = GameState::make_initial(CARD_J, CARD_Q).apply_action(Action::CALL);
+    const GameState chance = p1_to_act.apply_action(Action::CALL);
+
+    assert(chance.round == 1u);
+    assert(chance.player == 0u);
+    assert(chance.cards[2] == CARD_NONE);
+    assert(chance.history_r0 == 0x05u);
+    assert(chance.action_history == 0u);
+    assert(chance.is_chance_node());
+}
+
+void test_bet_and_call_reaches_chance_node()
+{
+    const GameState bet = GameState::make_initial(CARD_J, CARD_Q).apply_action(Action::RAISE);
+
+    assert(bet.round == 0u);
+    assert(bet.player == 1u);
+    assert(bet.pot == INITIAL_POT + BET_SIZE_ROUND0);
+    assert(bet.to_call == BET_SIZE_ROUND0);
+    assert(bet.raises_this_round == 1u);
+    assert(bet.action_history == 0x02u);
+
+    const GameState chance = bet.apply_action(Action::CALL);
+
+    assert(chance.round == 1u);
+    assert(chance.pot == INITIAL_POT + BET_SIZE_ROUND0 + BET_SIZE_ROUND0);
+    assert(chance.to_call == 0u);
+    assert(chance.raises_this_round == 0u);
+    assert(chance.history_r0 == 0x09u);
+    assert(chance.action_history == 0u);
+    assert(chance.is_chance_node());
+}
+
+void test_raise_calls_existing_bet_before_raising()
+{
+    const GameState bet = GameState::make_initial(CARD_J, CARD_Q).apply_action(Action::RAISE);
+    const GameState raise = bet.apply_action(Action::RAISE);
+
+    assert(raise.pot == INITIAL_POT + BET_SIZE_ROUND0 + BET_SIZE_ROUND0 + BET_SIZE_ROUND0);
+    assert(raise.to_call == BET_SIZE_ROUND0);
+    assert(raise.raises_this_round == 2u);
+    assert(raise.player == 0u);
+    assert(raise.action_history == 0x0Au);
+}
+
+void test_apply_chance_reveals_public_card()
+{
+    const GameState chance = GameState::make_initial(CARD_J, CARD_Q)
+                                 .apply_action(Action::CALL)
+                                 .apply_action(Action::CALL);
+    const GameState flop = chance.apply_chance(CARD_K);
+
+    assert(flop.round == 1u);
+    assert(flop.cards[2] == CARD_K);
+    assert(flop.player == 0u);
+    assert(flop.to_call == 0u);
+    assert(flop.raises_this_round == 0u);
+    assert(flop.action_history == 0u);
+    assert(!flop.is_chance_node());
+}
+
+void test_round_one_check_check_is_terminal()
+{
+    const GameState flop = GameState::make_initial(CARD_J, CARD_Q)
+                               .apply_action(Action::CALL)
+                               .apply_action(Action::CALL)
+                               .apply_chance(CARD_K);
+
+    const GameState terminal = flop.apply_action(Action::CALL).apply_action(Action::CALL);
+
+    assert(terminal.round == NUM_ROUNDS);
+    assert(terminal.is_terminal());
+    assert(terminal.action_history == 0x05u);
+}
+
 } // namespace
 
 int main()
@@ -69,6 +159,12 @@ int main()
     test_facing_bet_actions();
     test_capped_raise_actions();
     test_non_decision_nodes_have_no_actions();
+    test_first_check_switches_player();
+    test_check_check_reaches_chance_node();
+    test_bet_and_call_reaches_chance_node();
+    test_raise_calls_existing_bet_before_raising();
+    test_apply_chance_reveals_public_card();
+    test_round_one_check_check_is_terminal();
 
     std::cout << "All tests passed for game-state operations\n";
     return 0;
