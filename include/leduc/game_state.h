@@ -19,12 +19,13 @@ namespace leduc
     //   round             – Current betting round    (0 = pre-flop, 1 = flop)
     //   player            – Player to act next       (0 or 1)
     //   pot               – Total chips in the pot
+    //   committed[0/1]    – Chips each player has committed to the pot
     //   to_call           – Chips the current player must put in to call
     //   raises_this_round – Number of raises so far in the current round (0–2)
     //   action_history    – Bit-packed sequence of actions taken this hand
     //   folded            – NO_FOLD (0xFF) if nobody has folded; otherwise the
     //                       index of the player who folded (0 or 1)
-    //   padding[6]        – Explicit padding to reach exactly 16 bytes
+    //   padding[3]        – Explicit padding to reach exactly 16 bytes
 
     struct alignas(16) GameState
     {
@@ -32,12 +33,13 @@ namespace leduc
         uint8_t round;             // 0 or 1
         uint8_t player;            // 0 or 1 (player to act)
         uint8_t pot;               // Current pot size (chips)
+        uint8_t committed[2];      // Chips committed by [player 0, player 1]
         uint8_t to_call;           // Chips required to call (0 = free check)
         uint8_t raises_this_round; // Raises issued in the current round (0–2)
         uint8_t action_history;    // Bit-packed action sequence (2 bits per action)
         uint8_t folded;            // NO_FOLD (0xFF) or folding player index
         uint8_t history_r0;        // Terminal sequence of round 0 (for info-sets)
-        uint8_t padding[5];        // Pad to 16 bytes total
+        uint8_t padding[3];        // Pad to 16 bytes total
 
         // -----------------------------------------------------------------------
         // Factory: build the initial state for a new hand.
@@ -52,6 +54,8 @@ namespace leduc
             s.round = 0;
             s.player = 0;        // player 0 acts first pre-flop
             s.pot = INITIAL_POT; // both antes already in
+            s.committed[0] = ANTE;
+            s.committed[1] = ANTE;
             s.to_call = 0;       // no outstanding bet
             s.raises_this_round = 0;
             s.action_history = 0;
@@ -153,8 +157,10 @@ namespace leduc
             if (action == Action::RAISE)
             {
                 const uint8_t amount = bet_size();
+                const uint8_t chips_added = static_cast<uint8_t>(to_call + amount);
 
-                next.pot = static_cast<uint8_t>(next.pot + to_call + amount);
+                next.pot = static_cast<uint8_t>(next.pot + chips_added);
+                next.committed[player] = static_cast<uint8_t>(next.committed[player] + chips_added);
                 next.to_call = amount;
                 next.raises_this_round = static_cast<uint8_t>(raises_this_round + 1);
                 next.player = static_cast<uint8_t>(1 - player);
@@ -165,6 +171,7 @@ namespace leduc
             if (action == Action::CALL)
             {
                 next.pot = static_cast<uint8_t>(next.pot + to_call);
+                next.committed[player] = static_cast<uint8_t>(next.committed[player] + to_call);
                 next.to_call = 0;
 
                 const bool was_calling_bet = (to_call > 0);
@@ -196,6 +203,53 @@ namespace leduc
             }
 
             return next;
+        }
+
+        static int8_t evaluate_showdown(uint8_t p0_card,
+                                        uint8_t p1_card,
+                                        uint8_t public_card) noexcept
+        {
+            const int8_t p0_pair = static_cast<int8_t>(p0_card == public_card);
+            const int8_t p1_pair = static_cast<int8_t>(p1_card == public_card);
+            const int8_t has_pair = static_cast<int8_t>(p0_pair | p1_pair);
+
+            const int8_t pair_cmp = static_cast<int8_t>(p0_pair - p1_pair);
+            const int8_t rank_cmp = static_cast<int8_t>(
+                static_cast<int8_t>(p0_card > p1_card) -
+                static_cast<int8_t>(p0_card < p1_card));
+
+            return static_cast<int8_t>(pair_cmp * has_pair + rank_cmp * (1 - has_pair));
+        }
+
+        int16_t terminal_utility(uint8_t for_player) const noexcept
+        {
+            if (folded != NO_FOLD)
+            {
+                const uint8_t winner = static_cast<uint8_t>(1 - folded);
+
+                if (winner == for_player)
+                {
+                    return static_cast<int16_t>(pot - committed[for_player]);
+                }
+
+                return static_cast<int16_t>(-static_cast<int16_t>(committed[for_player]));
+            }
+
+            const int8_t outcome = evaluate_showdown(cards[0], cards[1], cards[2]);
+
+            if (outcome == 0)
+            {
+                return static_cast<int16_t>((pot / 2) - committed[for_player]);
+            }
+
+            const uint8_t winner = (outcome > 0) ? 0 : 1;
+
+            if (winner == for_player)
+            {
+                return static_cast<int16_t>(pot - committed[for_player]);
+            }
+
+            return static_cast<int16_t>(-static_cast<int16_t>(committed[for_player]));
         }
 
     };

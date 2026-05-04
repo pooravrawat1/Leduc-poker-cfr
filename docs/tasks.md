@@ -66,15 +66,15 @@
 
 ### 2.3 Terminal Evaluation
 
-- [ ] 2.3.1 Implement evaluate_showdown() function (branchless)
+- [x] 2.3.1 Implement evaluate_showdown() function (branchless)
   - Compare pairs vs non-pairs
   - Compare card ranks
   - Return winner (-1, 0, 1)
-- [ ] 2.3.2 Implement terminal_utility() function
+- [x] 2.3.2 Implement terminal_utility() function
   - Handle fold case
   - Handle showdown case
   - Return utility for specified player
-- [ ] 2.3.3 Write unit tests for terminal evaluation
+- [x] 2.3.3 Write unit tests for terminal evaluation
   - Test pair vs non-pair
   - Test pair vs pair (higher rank wins)
   - Test non-pair vs non-pair

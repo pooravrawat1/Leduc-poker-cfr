@@ -13,6 +13,8 @@ void test_initial_state_actions()
 {
     const GameState state = GameState::make_initial(CARD_J, CARD_Q);
 
+    assert(state.committed[0] == ANTE);
+    assert(state.committed[1] == ANTE);
     assert(!state.is_terminal());
     assert(!state.is_chance_node());
     assert(state.legal_actions_mask() == 0x06u);
@@ -94,6 +96,8 @@ void test_bet_and_call_reaches_chance_node()
     assert(bet.round == 0u);
     assert(bet.player == 1u);
     assert(bet.pot == INITIAL_POT + BET_SIZE_ROUND0);
+    assert(bet.committed[0] == ANTE + BET_SIZE_ROUND0);
+    assert(bet.committed[1] == ANTE);
     assert(bet.to_call == BET_SIZE_ROUND0);
     assert(bet.raises_this_round == 1u);
     assert(bet.action_history == 0x02u);
@@ -102,6 +106,8 @@ void test_bet_and_call_reaches_chance_node()
 
     assert(chance.round == 1u);
     assert(chance.pot == INITIAL_POT + BET_SIZE_ROUND0 + BET_SIZE_ROUND0);
+    assert(chance.committed[0] == ANTE + BET_SIZE_ROUND0);
+    assert(chance.committed[1] == ANTE + BET_SIZE_ROUND0);
     assert(chance.to_call == 0u);
     assert(chance.raises_this_round == 0u);
     assert(chance.history_r0 == 0x09u);
@@ -115,6 +121,8 @@ void test_raise_calls_existing_bet_before_raising()
     const GameState raise = bet.apply_action(Action::RAISE);
 
     assert(raise.pot == INITIAL_POT + BET_SIZE_ROUND0 + BET_SIZE_ROUND0 + BET_SIZE_ROUND0);
+    assert(raise.committed[0] == ANTE + BET_SIZE_ROUND0);
+    assert(raise.committed[1] == ANTE + BET_SIZE_ROUND0 + BET_SIZE_ROUND0);
     assert(raise.to_call == BET_SIZE_ROUND0);
     assert(raise.raises_this_round == 2u);
     assert(raise.player == 0u);
@@ -151,6 +159,57 @@ void test_round_one_check_check_is_terminal()
     assert(terminal.action_history == 0x05u);
 }
 
+void test_showdown_pair_beats_high_card()
+{
+    assert(GameState::evaluate_showdown(CARD_J, CARD_K, CARD_J) == 1);
+    assert(GameState::evaluate_showdown(CARD_K, CARD_J, CARD_J) == -1);
+}
+
+void test_showdown_high_card_comparison()
+{
+    assert(GameState::evaluate_showdown(CARD_K, CARD_Q, CARD_J) == 1);
+    assert(GameState::evaluate_showdown(CARD_J, CARD_Q, CARD_K) == -1);
+    assert(GameState::evaluate_showdown(CARD_Q, CARD_Q, CARD_K) == 0);
+}
+
+void test_fold_terminal_utility()
+{
+    const GameState folded = GameState::make_initial(CARD_J, CARD_Q)
+                                 .apply_action(Action::RAISE)
+                                 .apply_action(Action::FOLD);
+
+    assert(folded.is_terminal());
+    assert(folded.terminal_utility(0) == 1);
+    assert(folded.terminal_utility(1) == -1);
+    assert(folded.terminal_utility(0) + folded.terminal_utility(1) == 0);
+}
+
+void test_showdown_terminal_utility()
+{
+    const GameState terminal = GameState::make_initial(CARD_K, CARD_Q)
+                                   .apply_action(Action::RAISE)
+                                   .apply_action(Action::CALL)
+                                   .apply_chance(CARD_K)
+                                   .apply_action(Action::CALL)
+                                   .apply_action(Action::CALL);
+
+    assert(terminal.is_terminal());
+    assert(terminal.terminal_utility(0) == 3);
+    assert(terminal.terminal_utility(1) == -3);
+    assert(terminal.terminal_utility(0) + terminal.terminal_utility(1) == 0);
+}
+
+void test_tie_terminal_utility()
+{
+    GameState terminal = GameState::make_initial(CARD_Q, CARD_Q);
+    terminal.cards[2] = CARD_K;
+    terminal.round = NUM_ROUNDS;
+
+    assert(terminal.is_terminal());
+    assert(terminal.terminal_utility(0) == 0);
+    assert(terminal.terminal_utility(1) == 0);
+}
+
 } // namespace
 
 int main()
@@ -165,6 +224,11 @@ int main()
     test_raise_calls_existing_bet_before_raising();
     test_apply_chance_reveals_public_card();
     test_round_one_check_check_is_terminal();
+    test_showdown_pair_beats_high_card();
+    test_showdown_high_card_comparison();
+    test_fold_terminal_utility();
+    test_showdown_terminal_utility();
+    test_tie_terminal_utility();
 
     std::cout << "All tests passed for game-state operations\n";
     return 0;
