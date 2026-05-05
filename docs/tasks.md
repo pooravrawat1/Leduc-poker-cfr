@@ -85,14 +85,14 @@
 
 ### 3.1 Regret Matching
 
-- [ ] 3.1.1 Implement regret_match() function
+- [x] 3.1.1 Implement regret_match() function
   - Clamp negative regrets to 0
   - Normalize positive regrets
   - Return uniform strategy if all regrets ≤ 0
-- [ ] 3.1.2 Implement get_average_strategy() function
+- [x] 3.1.2 Implement get_average_strategy() function
   - Normalize strategy_sum to get average strategy
   - Handle case where strategy_sum is all zeros
-- [ ] 3.1.3 Write unit tests for regret matching
+- [x] 3.1.3 Write unit tests for regret matching
   - Test with positive regrets
   - Test with negative regrets
   - Test with mixed regrets

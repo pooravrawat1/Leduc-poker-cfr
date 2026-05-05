@@ -1,6 +1,8 @@
 #pragma once
 
-#include <bits/stdc++.h>
+#include <cstddef>
+#include <cstdint>
+
 #include "types.h"
 
 namespace leduc
@@ -88,24 +90,34 @@ namespace leduc
         /// regrets are ≤ 0.
         void update_strategy() noexcept
         {
-            float pos_sum = 0.0f;
+            float positive_sum = 0.0f;
+
             for (int i = 0; i < NUM_ACTIONS; ++i)
             {
-                float r = (action_mask >> i) & 1 ? regret_sum[i] : 0.0f;
-                strategy[i] = (r > 0.0f) ? r : 0.0f;
-                pos_sum += strategy[i];
+                const bool legal = ((action_mask >> i) & 1u) != 0;
+                const float regret = legal ? regret_sum[i] : 0.0f;
+
+                strategy[i] = (regret > 0.0f) ? regret : 0.0f;
+                positive_sum += strategy[i];
             }
-            if (pos_sum > 0.0f)
+
+            if (positive_sum > 0.0f)
             {
                 for (int i = 0; i < NUM_ACTIONS; ++i)
-                    strategy[i] /= pos_sum;
+                {
+                    strategy[i] /= positive_sum;
+                }
+                return;
             }
-            else
+
+            const float uniform = (num_actions > 0)
+                                      ? 1.0f / static_cast<float>(num_actions)
+                                      : 0.0f;
+
+            for (int i = 0; i < NUM_ACTIONS; ++i)
             {
-                // Uniform over legal actions
-                float uniform = 1.0f / static_cast<float>(num_actions);
-                for (int i = 0; i < NUM_ACTIONS; ++i)
-                    strategy[i] = ((action_mask >> i) & 1) ? uniform : 0.0f;
+                const bool legal = ((action_mask >> i) & 1u) != 0;
+                strategy[i] = legal ? uniform : 0.0f;
             }
         }
 
@@ -114,18 +126,31 @@ namespace leduc
         void get_average_strategy(float out[NUM_ACTIONS]) const noexcept
         {
             float total = 0.0f;
+
             for (int i = 0; i < NUM_ACTIONS; ++i)
-                total += strategy_sum[i];
+            {
+                const bool legal = ((action_mask >> i) & 1u) != 0;
+                total += legal ? strategy_sum[i] : 0.0f;
+            }
+
             if (total > 0.0f)
             {
                 for (int i = 0; i < NUM_ACTIONS; ++i)
-                    out[i] = strategy_sum[i] / total;
+                {
+                    const bool legal = ((action_mask >> i) & 1u) != 0;
+                    out[i] = legal ? strategy_sum[i] / total : 0.0f;
+                }
+                return;
             }
-            else
+
+            const float uniform = (num_actions > 0)
+                                      ? 1.0f / static_cast<float>(num_actions)
+                                      : 0.0f;
+
+            for (int i = 0; i < NUM_ACTIONS; ++i)
             {
-                float uniform = 1.0f / static_cast<float>(num_actions);
-                for (int i = 0; i < NUM_ACTIONS; ++i)
-                    out[i] = ((action_mask >> i) & 1) ? uniform : 0.0f;
+                const bool legal = ((action_mask >> i) & 1u) != 0;
+                out[i] = legal ? uniform : 0.0f;
             }
         }
     };
